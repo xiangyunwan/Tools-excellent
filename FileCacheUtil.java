@@ -5,6 +5,8 @@ import android.os.Environment;
 import android.os.Handler;
 import android.text.TextUtils;
 
+import org.junit.Test;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -366,8 +368,8 @@ public class FileCacheUtil {
      * get file status
      */
     public interface FileCacheCallBack {
-        public void onFinish(String str);
+        void onFinish(String str);
 
-        public void onfail();
+        void onfail();
     }
 }
