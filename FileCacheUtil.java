@@ -3,20 +3,27 @@ package com.letv.jr.common.util;
 import android.content.Context;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.Message;
 import android.text.TextUtils;
 
-import org.junit.Test;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.Map;
 
 import static com.letv.jr.common.util.FileUtil.createFile;
 
@@ -28,6 +35,7 @@ import static com.letv.jr.common.util.FileUtil.createFile;
 
 public class FileCacheUtil {
 
+    private final  static  int READ_CACHE=0x001;
 
     /**
      * SD卡根目录,Sdcard分为内置和外插，现在手机一般会有内置SdCard，但仍按Sdcard处理
@@ -87,6 +95,89 @@ public class FileCacheUtil {
                 }
             }
         };
+    }
+
+    /**
+     * 对象写入缓存
+     * @param context
+     * @param obj  必需序列化
+     * @param fileName
+     * @param <T>
+     */
+    public static <T> void writeToCache(final Context context, final T obj,
+                                  final String fileName) {
+        mHandler.post(new Runnable() {
+
+            @Override
+            public void run() {
+                String strFileName = strToMD5(fileName);
+                String filePath = context.getFilesDir().getPath() + File.separator +strFileName;
+                writeDateToFile(obj,filePath );
+            }
+        });
+    }
+    /**
+     * 读取对象缓存
+     * @param context
+     * @param fileName
+     * @param listener
+     * @param <T>
+     */
+    public static <T> void readCache(final Context context, final String fileName,
+                               final FileCacheCallBack<T> listener) {
+        mHandler.post(new Runnable() {
+
+            @Override
+            public void run() {
+                String strFileName = strToMD5(fileName);
+                String filePath = context.getFilesDir().getPath() + File.separator +strFileName;
+                final T obj = readDateFromFile(context,filePath,listener);
+
+//                listener.onFinish(fileName ,obj);
+                Map<String, Object> data = new HashMap<String, Object>();
+                data.put("listener", listener);
+                data.put("bean", obj);
+                data.put("fileName", strFileName);
+                Message msg = mHandler.obtainMessage();
+                msg.what = READ_CACHE;
+                msg.obj = data;
+                // 转给主线程回调
+                mMainCallBackHandler.sendMessage(msg);
+            }
+        });
+    }
+
+    public static synchronized <T> void writeDateToFile(T rsls, String filePath) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(baos);
+            oos.writeObject(rsls);
+            byte[] data = baos.toByteArray();
+            OutputStream os = new FileOutputStream(new File(filePath));
+            os.write(data);
+            os.flush();
+            os.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static synchronized <T> T readDateFromFile(Context context,final String filePath,final FileCacheCallBack<T> listener) {
+        T obj = null;
+        try {
+
+            FileInputStream fis = new FileInputStream(filePath);
+            ObjectInputStream ois = new ObjectInputStream(fis);
+            while (fis.available() > 0) {
+                obj = (T) ois.readObject();
+            }
+            ois.close();
+        } catch (Exception e) {
+//			e.printStackTrace();
+            listener.onfail(e.toString());
+        }
+        return obj;
     }
 
     /**
@@ -223,12 +314,12 @@ public class FileCacheUtil {
      */
     private static String readExternalSDCardFile(Context context, String fileName, final FileCacheCallBack cacheCallBack) {
         if (TextUtils.isEmpty(fileName)) {
-            cacheCallBack.onfail();
+            cacheCallBack.onfail("fileName is null");
             return null;
         }
         String filePath = EXTERNAL_SD_PATH + strToMD5(fileName);
         if (!FileUtil.isFileExist(filePath)) {
-            cacheCallBack.onfail();
+            cacheCallBack.onfail("filePath is null");
             return null;
         }
         String charsetName = "utf-8";
@@ -249,7 +340,7 @@ public class FileCacheUtil {
             cacheCallBack.onFinish(fileContent.toString());
             return fileContent.toString();
         } catch (IOException ie) {
-            cacheCallBack.onfail();
+            cacheCallBack.onfail("fail");
             ie.printStackTrace();
             return null;
         } finally {
@@ -279,13 +370,13 @@ public class FileCacheUtil {
      */
     private static String getDataFromFile(Context context, String fileName,final FileCacheCallBack cacheCallBack) {
         if (TextUtils.isEmpty(fileName)) {
-            cacheCallBack.onfail();
+            cacheCallBack.onfail("fileName is null");
             return null;
         }
         fileName = strToMD5(fileName);
         String filePath = context.getFilesDir().getPath() + File.separator + fileName;
         if (!FileUtil.isFileExist(filePath)) {
-            cacheCallBack.onfail();
+            cacheCallBack.onfail("fail");
             return null;
         }
         FileInputStream fileInputStream = null;
@@ -304,7 +395,7 @@ public class FileCacheUtil {
             cacheCallBack.onFinish(stringBuilder.toString());
             return stringBuilder.toString();
         } catch (Exception e) {
-            cacheCallBack.onfail();
+            cacheCallBack.onfail("fa");
             e.printStackTrace();
             return null;
         } finally {
@@ -332,6 +423,34 @@ public class FileCacheUtil {
         }
     }
 
+    /**
+     * 主线程回调Handler
+     */
+    private static Handler mMainCallBackHandler = new Handler() {
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            final FileCacheCallBack listener = (FileCacheCallBack) ((Map) msg.obj).get("listener");
+            final Object bean = (Object) ((Map) msg.obj).get("bean");
+            final String fileName = String.valueOf(((Map) msg.obj).get("fileName"));
+            switch (msg.what) {
+                case READ_CACHE:
+                    if (null == listener){
+                        listener.onfail("listener为空");
+                        return;
+                    }else{
+                        try {
+                            listener.onFinish(fileName,bean);
+                        } catch (Exception e) {
+                            delFile(fileName);
+                            listener.onfail("bean转换失败");
+                        }
+                    }
+                    break;
+                default:
+                    break;
+            }
+        };
+    };
     /**
      * 文件名称统一为16位MD5保存和查询
      *
@@ -365,11 +484,47 @@ public class FileCacheUtil {
     }
 
     /**
+     * 删除对象形式缓存数据
+     * @param context
+     * @param fileName
+     */
+    public static void delCacheBeanFile(Context context,String fileName){
+        fileName = strToMD5(fileName);
+        String filePath = context.getFilesDir().getPath() + File.separator +fileName;
+        File file = new File(filePath);
+        if(file.exists()){
+            file.delete();
+        }
+    }
+
+    /**
+     *删除所有缓存数据
+     * @param context
+     */
+    public static void delAllCacheBeanFile(Context context){
+        String filePath = context.getFilesDir().getPath() + File.separator ;
+        FileUtil.delete(filePath, new FilenameFilter() {
+            @Override
+            public boolean accept(File dir, String filename) {
+                return false;
+            }
+        });
+    }
+    public static void delFile(String filePath){
+        File file = new File(filePath);
+        if(file.exists()){
+            file.delete();
+        }
+    }
+    /**
      * get file status
      */
-    public interface FileCacheCallBack {
+    public interface FileCacheCallBack<T> {
         void onFinish(String str);
 
-        void onfail();
+        void onfail(String msg);
+
+        void onFinish(String str ,T t);
+
     }
 }
