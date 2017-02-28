@@ -54,6 +54,8 @@ public class Signature {
 
             map.put("SHA256", getMessageDigest("SHA256", signature));
 
+			map.put("HASH", getMessageDigest("HASH", signature));
+			
             Set<Map.Entry<String, String>> entrySet = map.entrySet();
             for (Map.Entry<String, String> entry : entrySet) {
                 Log.i("",String.format("%s=%s", entry.getKey(), entry.getValue()));
